@@ -26,3 +26,9 @@ Example: Compress and print the first N fibonacci numbers
     }
     os << std::flush;
 
+The output stream need not be `std::cout`.
+
+    std::ostringstream ostrstr{};
+    def_streambuf osb{ostrstr, Z_DEFAULT_COMPRESSION};
+    //...
+
