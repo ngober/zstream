@@ -3,6 +3,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include <vector>
 #include <zlib.h>
@@ -175,29 +176,39 @@ auto inf_streambuf<I>::underflow() -> int_type
 /* compress or decompress from stdin to stdout */
 int main(int argc, char **argv)
 {
-    /* do compression if no arguments */
-    if (argc == 1)
-    {
-        def_streambuf<decltype(std::cout)> osb{std::cout, Z_DEFAULT_COMPRESSION};
-        std::ostream os{&osb};
-        std::copy(std::istreambuf_iterator<char>{std::cin}, std::istreambuf_iterator<char>{}, std::ostreambuf_iterator<char>{os});
-        return 0;
-    }
-
-    /* do decompression if -d specified */
-    else if (argc == 2 && argv[1] == std::string{"-d"})
-    {
-        inf_streambuf<decltype(std::cin)> isb{std::cin};
-        std::istream is{&isb};
-        std::copy(std::istreambuf_iterator<char>{is}, std::istreambuf_iterator<char>{}, std::ostreambuf_iterator<char>{std::cout});
-        return 0;
-    }
+    // Tests
+    static_assert(std::is_move_constructible<inf_streambuf<decltype(std::cin)>>::value);
+    static_assert(std::is_move_assignable<inf_streambuf<decltype(std::cin)>>::value);
+    static_assert(std::is_swappable<inf_streambuf<decltype(std::cin)>>::value);
+    static_assert(std::is_move_constructible<def_streambuf<decltype(std::cout)>>::value);
+    static_assert(std::is_move_assignable<def_streambuf<decltype(std::cout)>>::value);
+    static_assert(std::is_swappable<def_streambuf<decltype(std::cout)>>::value);
 
     // Report usage
-    else
+    if (argc > 2 || (argc == 2 && argv[1] != std::string{"-d"}))
     {
         std::cerr << "zpipe usage: zpipe [-d] < source > dest" << std::endl;
         return 1;
     }
+
+    // do decompression if -d specified
+    bool is_decomp = (argc > 1);
+
+    // Initialize a deflation buffer
+    def_streambuf osb{std::cout, Z_DEFAULT_COMPRESSION};
+    std::ostream os{&osb};
+
+    // Initialize an inflation buffer
+    inf_streambuf isb{std::cin};
+    std::istream is{&isb};
+
+    // Decide which direction to operate
+    std::ostream *out = is_decomp ? &std::cout : &os;
+    std::istream *in  = is_decomp ? &is        : &std::cin;
+
+    // Copy the entire stream
+    std::copy(std::istreambuf_iterator<char>{*in}, std::istreambuf_iterator<char>{}, std::ostreambuf_iterator<char>{*out});
+
+    return 0;
 }
 
