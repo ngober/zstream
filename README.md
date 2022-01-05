@@ -11,12 +11,13 @@ Run with
 
 These stream buffers can be used with any type that supports `operator>>` and/or `operator<<`.
 
-Example: Compress and print the first N fibonacci numbers
+Example: Compress the first N fibonacci numbers and capture the result as a `std::string`.
 
-    def_streambuf osb{std::cout};
+    std::ostringstream ostrstr{};
+    def_streambuf osb{ostrstr};
     std::ostream os{&osb};
 
-    constexpr std::size_t N = 1 << 16;
+    constexpr std::size_t N = 1 << 8;
     long curr = 0, next = 1;
 
     for (std::size_t i = 0; i < N; ++i)
@@ -25,10 +26,5 @@ Example: Compress and print the first N fibonacci numbers
         curr = std::exchange(next, next+curr);
     }
     os << std::flush;
-
-The output stream need not be `std::cout`.
-
-    std::ostringstream ostrstr{};
-    def_streambuf osb{ostrstr};
-    //...
-
+    
+    std::string result = ostrstr.str();
