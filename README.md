@@ -5,3 +5,7 @@ Compile with
 
     g++ --std=c++11 zstream.cc -lz
 
+
+Run with
+
+    ./a.out < foo.txt > foo.gz
