@@ -5,6 +5,10 @@ Compile with
 
     g++ --std=c++11 zstream.cc -lz
 
+Run with
+
+    ./a.out < foo.txt > foo.gz
+
 These stream buffers can be used with any type that supports `operator>>` and/or `operator<<`.
 
 Example: Compress and print the first N fibonacci numbers
@@ -21,6 +25,4 @@ Example: Compress and print the first N fibonacci numbers
         curr = std::exchange(next, next+curr);
     }
     os << std::flush;
-
-
 
