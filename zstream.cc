@@ -31,7 +31,7 @@ class def_streambuf : public std::basic_streambuf<typename OStrm::char_type, std
         bool def(int flush);
 
     public:
-        def_streambuf(OStrm &out, int level) : dest(&out)
+        explicit def_streambuf(OStrm &out, int level = Z_DEFAULT_COMPRESSION) : dest(&out)
         {
             deflateInit(strm.get(), level);
             this->setp(in_buf.data(), std::next(in_buf.data(), in_buf.size() - 1));
@@ -110,7 +110,7 @@ class inf_streambuf : public std::basic_streambuf<typename IStrm::char_type, std
         typename std::add_pointer<IStrm>::type src;
 
     public:
-        inf_streambuf(IStrm &in, int window_bits = 15+32) : src(&in)
+        explicit inf_streambuf(IStrm &in, int window_bits = 15+32) : src(&in)
         {
             inflateInit2(strm.get(), window_bits);
         }
@@ -195,7 +195,7 @@ int main(int argc, char **argv)
     bool is_decomp = (argc > 1);
 
     // Initialize a deflation buffer
-    def_streambuf osb{std::cout, Z_DEFAULT_COMPRESSION};
+    def_streambuf osb{std::cout};
     std::ostream os{&osb};
 
     // Initialize an inflation buffer

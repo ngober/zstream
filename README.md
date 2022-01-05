@@ -13,7 +13,7 @@ These stream buffers can be used with any type that supports `operator>>` and/or
 
 Example: Compress and print the first N fibonacci numbers
 
-    def_streambuf osb{std::cout, Z_DEFAULT_COMPRESSION};
+    def_streambuf osb{std::cout};
     std::ostream os{&osb};
 
     constexpr std::size_t N = 1 << 16;
@@ -29,6 +29,6 @@ Example: Compress and print the first N fibonacci numbers
 The output stream need not be `std::cout`.
 
     std::ostringstream ostrstr{};
-    def_streambuf osb{ostrstr, Z_DEFAULT_COMPRESSION};
+    def_streambuf osb{ostrstr};
     //...
 
