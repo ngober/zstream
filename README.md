@@ -1,3 +1,4 @@
+[![pre-commit.ci status](https://results.pre-commit.ci/badge/github/ngober/zstream/main.svg)](https://results.pre-commit.ci/latest/github/ngober/zstream/main)
 # zstream
 A standard-library-compatible implementation of a stream that compresses or decompresses with zlib.
 
