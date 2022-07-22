@@ -34,37 +34,45 @@
 
 #include <cstring>
 
-#define Z_STREAM_INIT_ARGS Z_NULL, 0, 0, Z_NULL, 0, 0, NULL, NULL, Z_NULL, Z_NULL, Z_NULL
+enum class status_t
+{
+  CAN_CONTINUE,
+  END,
+  ERROR
+};
 
 template <int window = 15+32, int compression = Z_DEFAULT_COMPRESSION>
 struct gzip_tag_t
 {
   using state_type = z_stream;
+  using char_type = std::remove_pointer_t<decltype(state_type::next_in)>;
+  using deflate_state_type = std::unique_ptr<state_type, decltype(&::deflateEnd)>;
+  using inflate_state_type = std::unique_ptr<state_type, decltype(&::inflateEnd)>;
+  using status_type = status_t;
 
-  enum class status_t
-  {
-    CAN_CONTINUE,
-    END,
-    ERROR
-  };
-
-  static void begin_deflate(state_type *x) { ::deflateInit(x, compression); }
-  static void begin_inflate(state_type *x) { ::inflateInit2(x, window); }
-
-  static void finish_deflate(state_type *x) { ::deflateEnd(x); }
-  static void finish_inflate(state_type *x) { ::inflateEnd(x); }
-
-  static status_t deflate(state_type *x, int flush) {
-    auto ret = ::deflate(x, flush);
+  static status_type deflate(deflate_state_type &x, bool flush) {
+    auto ret = ::deflate(x.get(), flush ? Z_FINISH : Z_NO_FLUSH);
     if (ret == Z_OK)
-      return status_t::CAN_CONTINUE;
+      return status_type::CAN_CONTINUE;
     if (ret == Z_STREAM_END)
-      return status_t::END;
-    return status_t::ERROR;
+      return status_type::END;
+    return status_type::ERROR;
   }
 
-  static void inflate(state_type *x) {
-    ::inflate(x, Z_NO_FLUSH);
+  static void inflate(inflate_state_type &x) {
+    ::inflate(x.get(), Z_NO_FLUSH);
+  }
+
+  static deflate_state_type new_deflate_state() {
+    deflate_state_type state{new state_type{Z_NULL, 0, 0, Z_NULL, 0, 0, NULL, NULL, Z_NULL, Z_NULL, Z_NULL}, &::deflateEnd};
+    ::deflateInit(state.get(), compression);
+    return state;
+  }
+
+  static inflate_state_type new_inflate_state() {
+    inflate_state_type state{new state_type{Z_NULL, 0, 0, Z_NULL, 0, 0, NULL, NULL, Z_NULL, Z_NULL, Z_NULL}, &::inflateEnd};
+    ::inflateInit2(state.get(), window);
+    return state;
   }
 };
 
@@ -75,21 +83,20 @@ class def_streambuf : public std::basic_streambuf<typename OStrm::char_type, std
         using base_type = std::basic_streambuf<typename OStrm::char_type, std::char_traits<typename OStrm::char_type>>;
         using int_type  = typename base_type::int_type;
         using char_type = typename base_type::char_type;
-        using strm_in_buf_type = std::remove_pointer<decltype(z_stream::next_in)>::type;
-        using strm_out_buf_type = std::remove_pointer<decltype(z_stream::next_out)>::type;
+        using strm_in_buf_type = typename Tag::char_type;
+        using strm_out_buf_type = typename Tag::char_type;
 
         constexpr static std::size_t CHUNK = (1 << 16);
 
         std::array<char_type, CHUNK> in_buf;
-        std::unique_ptr<typename Tag::state_type, decltype(&Tag::finish_deflate)> strm{new typename Tag::state_type{Z_STREAM_INIT_ARGS}, &Tag::finish_deflate};
+        typename Tag::deflate_state_type strm = Tag::new_deflate_state();
         typename std::add_pointer<OStrm>::type dest;
 
-        bool def(int flush);
+        bool def(bool flush);
 
     public:
-        explicit def_streambuf(Tag, OStrm &out, int level = Z_DEFAULT_COMPRESSION) : dest(&out)
+        explicit def_streambuf(Tag, OStrm &out) : dest(&out)
         {
-          Tag::begin_deflate(strm.get());
             this->setp(in_buf.data(), std::next(in_buf.data(), in_buf.size() - 1));
         }
 
@@ -101,7 +108,7 @@ class def_streambuf : public std::basic_streambuf<typename OStrm::char_type, std
 template < typename T, typename O >
 int def_streambuf<T,O>::sync()
 {
-    return def(Z_FINISH) ? 0 : -1;
+    return def(true) ? 0 : -1;
 }
 
 template < typename T, typename O >
@@ -113,12 +120,12 @@ auto def_streambuf<T,O>::overflow(int_type ch) -> int_type
     *this->pptr() = ch;
     this->pbump(1);
 
-    auto result = def(Z_NO_FLUSH);
+    auto result = def(false);
     return result ? ch : base_type::traits_type::eof();
 }
 
 template < typename T, typename O >
-bool def_streambuf<T,O>::def(int flush)
+bool def_streambuf<T,O>::def(bool flush)
 {
     std::array<strm_in_buf_type, std::tuple_size<decltype(this->in_buf)>::value> uns_in_buf;
     std::array<strm_out_buf_type, CHUNK> uns_out_buf;
@@ -127,25 +134,25 @@ bool def_streambuf<T,O>::def(int flush)
 
     strm->avail_in = std::distance(this->pbase(), this->pptr());
     strm->next_in  = uns_in_buf.data();
-    typename T::status_t ret;
+    typename T::status_type ret;
 
     do
     {
         strm->avail_out = uns_out_buf.size();
         strm->next_out  = uns_out_buf.data();
-        ret = T::deflate(strm.get(), flush);
+        ret = T::deflate(strm, flush);
 
         // Write to file
         std::array<char_type, std::size(uns_out_buf)> out_buf;
         std::memcpy(out_buf.data(), uns_out_buf.data(), uns_out_buf.size() - strm->avail_out);
         dest->write(out_buf.data(), uns_out_buf.size() - strm->avail_out);
-    } while (ret == T::status_t::CAN_CONTINUE && strm->avail_out == 0);
+    } while (ret == T::status_type::CAN_CONTINUE && strm->avail_out == 0);
 
     auto new_input_begin = std::distance(this->pbase(), this->pptr()) - strm->avail_in;
     std::copy_n(std::next(std::begin(this->in_buf), new_input_begin), strm->avail_in, std::begin(this->in_buf));
 
     this->pbump(-1*new_input_begin); // reset pptr
-    return ret == T::status_t::CAN_CONTINUE || ret == T::status_t::END;
+    return ret == T::status_type::CAN_CONTINUE || ret == T::status_type::END;
 }
 
 template< typename Tag, typename IStrm >
@@ -155,20 +162,19 @@ class inf_streambuf : public std::basic_streambuf<typename IStrm::char_type, std
         using base_type = std::basic_streambuf<typename IStrm::char_type, std::char_traits<typename IStrm::char_type>>;
         using int_type  = typename base_type::int_type;
         using char_type = typename base_type::char_type;
-        using strm_in_buf_type = std::remove_pointer<decltype(z_stream::next_in)>::type;
-        using strm_out_buf_type = std::remove_pointer<decltype(z_stream::next_out)>::type;
+        using strm_in_buf_type = typename Tag::char_type;
+        using strm_out_buf_type = typename Tag::char_type;
 
         constexpr static std::size_t CHUNK = (1 << 16);
 
         std::array<strm_in_buf_type, CHUNK> in_buf;
         std::array<char_type, CHUNK> out_buf;
-        std::unique_ptr<typename Tag::state_type, decltype(&Tag::finish_inflate)> strm{new typename Tag::state_type{Z_STREAM_INIT_ARGS}, &Tag::finish_inflate};
+        typename Tag::inflate_state_type strm = Tag::new_inflate_state();
         typename std::add_pointer<IStrm>::type src;
 
     public:
-        explicit inf_streambuf(Tag, IStrm &in, int window_bits = 15+32) : src(&in)
+        explicit inf_streambuf(Tag, IStrm &in) : src(&in)
         {
-          Tag::begin_inflate(strm.get());
         }
 
         std::size_t bytes_read() const
@@ -217,7 +223,7 @@ auto inf_streambuf<T,I>::underflow() -> int_type
         }
 
         // Perform inflation
-        T::inflate(strm.get());
+        T::inflate(strm);
     }
     // Repeat until we actually get new output
     while (strm->avail_out == uns_out_buf.size());
