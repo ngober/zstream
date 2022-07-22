@@ -36,7 +36,12 @@
 
 #define Z_STREAM_INIT_ARGS Z_NULL, 0, 0, Z_NULL, 0, 0, NULL, NULL, Z_NULL, Z_NULL, Z_NULL
 
-template< typename OStrm >
+struct gzip_tag_t
+{
+  using state_type = z_stream;
+};
+
+template< typename Tag, typename OStrm >
 class def_streambuf : public std::basic_streambuf<typename OStrm::char_type, std::char_traits<typename OStrm::char_type>>
 {
     private:
@@ -49,13 +54,13 @@ class def_streambuf : public std::basic_streambuf<typename OStrm::char_type, std
         constexpr static std::size_t CHUNK = (1 << 16);
 
         std::array<char_type, CHUNK> in_buf;
-        std::unique_ptr<z_stream, decltype(&deflateEnd)> strm{new z_stream{Z_STREAM_INIT_ARGS}, &deflateEnd};
+        std::unique_ptr<typename Tag::state_type, decltype(&deflateEnd)> strm{new typename Tag::state_type{Z_STREAM_INIT_ARGS}, &deflateEnd};
         typename std::add_pointer<OStrm>::type dest;
 
         bool def(int flush);
 
     public:
-        explicit def_streambuf(OStrm &out, int level = Z_DEFAULT_COMPRESSION) : dest(&out)
+        explicit def_streambuf(Tag, OStrm &out, int level = Z_DEFAULT_COMPRESSION) : dest(&out)
         {
             deflateInit(strm.get(), level);
             this->setp(in_buf.data(), std::next(in_buf.data(), in_buf.size() - 1));
@@ -66,14 +71,14 @@ class def_streambuf : public std::basic_streambuf<typename OStrm::char_type, std
         int sync() override;
 };
 
-template < typename O >
-int def_streambuf<O>::sync()
+template < typename T, typename O >
+int def_streambuf<T,O>::sync()
 {
     return def(Z_FINISH) ? 0 : -1;
 }
 
-template < typename O >
-auto def_streambuf<O>::overflow(int_type ch) -> int_type
+template < typename T, typename O >
+auto def_streambuf<T,O>::overflow(int_type ch) -> int_type
 {
     if (ch == base_type::traits_type::eof())
         return ch;
@@ -85,8 +90,8 @@ auto def_streambuf<O>::overflow(int_type ch) -> int_type
     return result ? ch : base_type::traits_type::eof();
 }
 
-template < typename O >
-bool def_streambuf<O>::def(int flush)
+template < typename T, typename O >
+bool def_streambuf<T,O>::def(int flush)
 {
     std::array<strm_in_buf_type, std::tuple_size<decltype(this->in_buf)>::value> uns_in_buf;
     std::array<strm_out_buf_type, CHUNK> uns_out_buf;
@@ -116,7 +121,7 @@ bool def_streambuf<O>::def(int flush)
     return ret == Z_OK || ret == Z_STREAM_END;
 }
 
-template< typename IStrm >
+template< typename Tag, typename IStrm >
 class inf_streambuf : public std::basic_streambuf<typename IStrm::char_type, std::char_traits<typename IStrm::char_type>>
 {
     private:
@@ -130,11 +135,11 @@ class inf_streambuf : public std::basic_streambuf<typename IStrm::char_type, std
 
         std::array<strm_in_buf_type, CHUNK> in_buf;
         std::array<char_type, CHUNK> out_buf;
-        std::unique_ptr<z_stream, decltype(&inflateEnd)> strm{new z_stream{Z_STREAM_INIT_ARGS}, &inflateEnd};
+        std::unique_ptr<typename Tag::state_type, decltype(&inflateEnd)> strm{new typename Tag::state_type{Z_STREAM_INIT_ARGS}, &inflateEnd};
         typename std::add_pointer<IStrm>::type src;
 
     public:
-        explicit inf_streambuf(IStrm &in, int window_bits = 15+32) : src(&in)
+        explicit inf_streambuf(Tag, IStrm &in, int window_bits = 15+32) : src(&in)
         {
             inflateInit2(strm.get(), window_bits);
         }
@@ -148,8 +153,8 @@ class inf_streambuf : public std::basic_streambuf<typename IStrm::char_type, std
         int_type underflow() override;
 };
 
-template < typename I >
-auto inf_streambuf<I>::underflow() -> int_type
+template < typename T, typename I >
+auto inf_streambuf<T,I>::underflow() -> int_type
 {
     std::array<strm_out_buf_type, std::tuple_size<decltype(out_buf)>::value> uns_out_buf;
 
@@ -201,12 +206,12 @@ auto inf_streambuf<I>::underflow() -> int_type
 int main(int argc, char **argv)
 {
     // Tests
-    static_assert(std::is_move_constructible<inf_streambuf<decltype(std::cin)>>::value);
-    static_assert(std::is_move_assignable<inf_streambuf<decltype(std::cin)>>::value);
-    static_assert(std::is_swappable<inf_streambuf<decltype(std::cin)>>::value);
-    static_assert(std::is_move_constructible<def_streambuf<decltype(std::cout)>>::value);
-    static_assert(std::is_move_assignable<def_streambuf<decltype(std::cout)>>::value);
-    static_assert(std::is_swappable<def_streambuf<decltype(std::cout)>>::value);
+    static_assert(std::is_move_constructible<inf_streambuf<gzip_tag_t, decltype(std::cin)>>::value);
+    static_assert(std::is_move_assignable<inf_streambuf<gzip_tag_t, decltype(std::cin)>>::value);
+    static_assert(std::is_swappable<inf_streambuf<gzip_tag_t, decltype(std::cin)>>::value);
+    static_assert(std::is_move_constructible<def_streambuf<gzip_tag_t, decltype(std::cout)>>::value);
+    static_assert(std::is_move_assignable<def_streambuf<gzip_tag_t, decltype(std::cout)>>::value);
+    static_assert(std::is_swappable<def_streambuf<gzip_tag_t, decltype(std::cout)>>::value);
 
     // Report usage
     if (argc > 2 || (argc == 2 && argv[1] != std::string{"-d"}))
@@ -219,11 +224,11 @@ int main(int argc, char **argv)
     bool is_decomp = (argc > 1);
 
     // Initialize a deflation buffer
-    def_streambuf osb{std::cout};
+    def_streambuf osb{gzip_tag_t{}, std::cout};
     std::ostream os{&osb};
 
     // Initialize an inflation buffer
-    inf_streambuf isb{std::cin};
+    inf_streambuf isb{gzip_tag_t{}, std::cin};
     std::istream is{&isb};
 
     // Decide which direction to operate
