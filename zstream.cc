@@ -80,7 +80,7 @@ bool def_streambuf<O>::def(int flush)
         ret = deflate(strm.get(), flush);
 
         // Write to file
-        std::array<char_type, uns_out_buf.size()> out_buf;
+        std::array<char_type, std::size(uns_out_buf)> out_buf;
         std::memcpy(out_buf.data(), uns_out_buf.data(), uns_out_buf.size() - strm->avail_out);
         dest->write(out_buf.data(), uns_out_buf.size() - strm->avail_out);
     } while (ret == Z_OK && strm->avail_out == 0);
