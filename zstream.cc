@@ -39,6 +39,9 @@
 struct gzip_tag_t
 {
   using state_type = z_stream;
+
+  static void finish_deflate(state_type *x) { ::deflateEnd(x); }
+  static void finish_inflate(state_type *x) { ::inflateEnd(x); }
 };
 
 template< typename Tag, typename OStrm >
@@ -54,7 +57,7 @@ class def_streambuf : public std::basic_streambuf<typename OStrm::char_type, std
         constexpr static std::size_t CHUNK = (1 << 16);
 
         std::array<char_type, CHUNK> in_buf;
-        std::unique_ptr<typename Tag::state_type, decltype(&deflateEnd)> strm{new typename Tag::state_type{Z_STREAM_INIT_ARGS}, &deflateEnd};
+        std::unique_ptr<typename Tag::state_type, decltype(&Tag::finish_deflate)> strm{new typename Tag::state_type{Z_STREAM_INIT_ARGS}, &Tag::finish_deflate};
         typename std::add_pointer<OStrm>::type dest;
 
         bool def(int flush);
@@ -135,7 +138,7 @@ class inf_streambuf : public std::basic_streambuf<typename IStrm::char_type, std
 
         std::array<strm_in_buf_type, CHUNK> in_buf;
         std::array<char_type, CHUNK> out_buf;
-        std::unique_ptr<typename Tag::state_type, decltype(&inflateEnd)> strm{new typename Tag::state_type{Z_STREAM_INIT_ARGS}, &inflateEnd};
+        std::unique_ptr<typename Tag::state_type, decltype(&Tag::finish_inflate)> strm{new typename Tag::state_type{Z_STREAM_INIT_ARGS}, &Tag::finish_inflate};
         typename std::add_pointer<IStrm>::type src;
 
     public:
