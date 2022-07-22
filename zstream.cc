@@ -36,6 +36,7 @@
 
 #define Z_STREAM_INIT_ARGS Z_NULL, 0, 0, Z_NULL, 0, 0, NULL, NULL, Z_NULL, Z_NULL, Z_NULL
 
+template <int window = 15+32, int compression = Z_DEFAULT_COMPRESSION>
 struct gzip_tag_t
 {
   using state_type = z_stream;
@@ -46,6 +47,9 @@ struct gzip_tag_t
     END,
     ERROR
   };
+
+  static void begin_deflate(state_type *x) { ::deflateInit(x, compression); }
+  static void begin_inflate(state_type *x) { ::inflateInit2(x, window); }
 
   static void finish_deflate(state_type *x) { ::deflateEnd(x); }
   static void finish_inflate(state_type *x) { ::inflateEnd(x); }
@@ -85,7 +89,7 @@ class def_streambuf : public std::basic_streambuf<typename OStrm::char_type, std
     public:
         explicit def_streambuf(Tag, OStrm &out, int level = Z_DEFAULT_COMPRESSION) : dest(&out)
         {
-            deflateInit(strm.get(), level);
+          Tag::begin_deflate(strm.get());
             this->setp(in_buf.data(), std::next(in_buf.data(), in_buf.size() - 1));
         }
 
@@ -164,7 +168,7 @@ class inf_streambuf : public std::basic_streambuf<typename IStrm::char_type, std
     public:
         explicit inf_streambuf(Tag, IStrm &in, int window_bits = 15+32) : src(&in)
         {
-            inflateInit2(strm.get(), window_bits);
+          Tag::begin_inflate(strm.get());
         }
 
         std::size_t bytes_read() const
@@ -229,12 +233,12 @@ auto inf_streambuf<T,I>::underflow() -> int_type
 int main(int argc, char **argv)
 {
     // Tests
-    static_assert(std::is_move_constructible<inf_streambuf<gzip_tag_t, decltype(std::cin)>>::value);
-    static_assert(std::is_move_assignable<inf_streambuf<gzip_tag_t, decltype(std::cin)>>::value);
-    static_assert(std::is_swappable<inf_streambuf<gzip_tag_t, decltype(std::cin)>>::value);
-    static_assert(std::is_move_constructible<def_streambuf<gzip_tag_t, decltype(std::cout)>>::value);
-    static_assert(std::is_move_assignable<def_streambuf<gzip_tag_t, decltype(std::cout)>>::value);
-    static_assert(std::is_swappable<def_streambuf<gzip_tag_t, decltype(std::cout)>>::value);
+    static_assert(std::is_move_constructible<inf_streambuf<gzip_tag_t<>, decltype(std::cin)>>::value);
+    static_assert(std::is_move_assignable<inf_streambuf<gzip_tag_t<>, decltype(std::cin)>>::value);
+    static_assert(std::is_swappable<inf_streambuf<gzip_tag_t<>, decltype(std::cin)>>::value);
+    static_assert(std::is_move_constructible<def_streambuf<gzip_tag_t<>, decltype(std::cout)>>::value);
+    static_assert(std::is_move_assignable<def_streambuf<gzip_tag_t<>, decltype(std::cout)>>::value);
+    static_assert(std::is_swappable<def_streambuf<gzip_tag_t<>, decltype(std::cout)>>::value);
 
     // Report usage
     if (argc > 2 || (argc == 2 && argv[1] != std::string{"-d"}))
