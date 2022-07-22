@@ -40,8 +40,28 @@ struct gzip_tag_t
 {
   using state_type = z_stream;
 
+  enum class status_t
+  {
+    CAN_CONTINUE,
+    END,
+    ERROR
+  };
+
   static void finish_deflate(state_type *x) { ::deflateEnd(x); }
   static void finish_inflate(state_type *x) { ::inflateEnd(x); }
+
+  static status_t deflate(state_type *x, int flush) {
+    auto ret = ::deflate(x, flush);
+    if (ret == Z_OK)
+      return status_t::CAN_CONTINUE;
+    if (ret == Z_STREAM_END)
+      return status_t::END;
+    return status_t::ERROR;
+  }
+
+  static void inflate(state_type *x) {
+    ::inflate(x, Z_NO_FLUSH);
+  }
 };
 
 template< typename Tag, typename OStrm >
@@ -103,25 +123,25 @@ bool def_streambuf<T,O>::def(int flush)
 
     strm->avail_in = std::distance(this->pbase(), this->pptr());
     strm->next_in  = uns_in_buf.data();
-    int ret;
+    typename T::status_t ret;
 
     do
     {
         strm->avail_out = uns_out_buf.size();
         strm->next_out  = uns_out_buf.data();
-        ret = deflate(strm.get(), flush);
+        ret = T::deflate(strm.get(), flush);
 
         // Write to file
         std::array<char_type, std::size(uns_out_buf)> out_buf;
         std::memcpy(out_buf.data(), uns_out_buf.data(), uns_out_buf.size() - strm->avail_out);
         dest->write(out_buf.data(), uns_out_buf.size() - strm->avail_out);
-    } while (ret == Z_OK && strm->avail_out == 0);
+    } while (ret == T::status_t::CAN_CONTINUE && strm->avail_out == 0);
 
     auto new_input_begin = std::distance(this->pbase(), this->pptr()) - strm->avail_in;
     std::copy_n(std::next(std::begin(this->in_buf), new_input_begin), strm->avail_in, std::begin(this->in_buf));
 
     this->pbump(-1*new_input_begin); // reset pptr
-    return ret == Z_OK || ret == Z_STREAM_END;
+    return ret == T::status_t::CAN_CONTINUE || ret == T::status_t::END;
 }
 
 template< typename Tag, typename IStrm >
@@ -193,7 +213,7 @@ auto inf_streambuf<T,I>::underflow() -> int_type
         }
 
         // Perform inflation
-        inflate(strm.get(), Z_NO_FLUSH);
+        T::inflate(strm.get());
     }
     // Repeat until we actually get new output
     while (strm->avail_out == uns_out_buf.size());
