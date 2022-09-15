@@ -24,28 +24,30 @@
 
 #include <algorithm>
 #include <array>
-#include <iostream>
+#include <cassert>
+#include <cstring>
 #include <iterator>
 #include <memory>
+#include <streambuf>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
-#if __has_include("zlib.h")
+#if __has_include(<zlib.h>)
 
 #include <zlib.h>
 #define ZLIB_INCLUDED
 
 #endif
 
-#if __has_include("lzma.h")
+#if __has_include(<lzma.h>)
 
 #include <lzma.h>
 #define LZMA_INCLUDED
 
 #endif
 
-#include <cstring>
+namespace zstream {
 
 enum class status_t
 {
@@ -54,7 +56,7 @@ enum class status_t
   ERROR
 };
 
-#ifdef GZIP_INCLUDED
+#ifdef ZLIB_INCLUDED
 template <int window = 15+32, int compression = Z_DEFAULT_COMPRESSION>
 struct gzip_tag_t
 {
@@ -74,8 +76,9 @@ struct gzip_tag_t
     return status_type::ERROR;
   }
 
-  static void inflate(inflate_state_type &x) {
+  static status_type inflate(inflate_state_type &x) {
     ::inflate(x.get(), Z_NO_FLUSH);
+    return status_type::CAN_CONTINUE;
   }
 
   static deflate_state_type new_deflate_state() {
@@ -93,7 +96,7 @@ struct gzip_tag_t
 #endif
 
 #ifdef LZMA_INCLUDED
-template <uint64_t memlimit = (1 << 20), uint32_t flags = 0>
+template <uint32_t flags = 0>
 struct lzma_tag_t
 {
   using state_type = lzma_stream;
@@ -107,26 +110,35 @@ struct lzma_tag_t
     auto ret = ::lzma_code(x.get(), flush ? LZMA_FULL_FLUSH : LZMA_RUN);
     if (ret == LZMA_OK)
       return status_type::CAN_CONTINUE;
-    if (ret == LZMA_STREAM_END)
+    else if (ret == LZMA_STREAM_END)
       return status_type::END;
-    return status_type::ERROR;
+    else
+      return status_type::ERROR;
   }
 
-  static void inflate(inflate_state_type &x) {
-    ::lzma_code(x.get(), LZMA_RUN);
+  static status_type inflate(inflate_state_type &x) {
+    auto ret = ::lzma_code(x.get(), LZMA_RUN);
+    if (ret == LZMA_OK)
+      return status_type::CAN_CONTINUE;
+    else if (ret == LZMA_STREAM_END)
+      return status_type::END;
+    else
+      return status_type::ERROR;
   }
 
   static deflate_state_type new_deflate_state() {
     deflate_state_type state{new state_type, &::lzma_end};
     *state = LZMA_STREAM_INIT;
-    ::lzma_auto_decoder(state.get(), 9, LZMA_CHECK_CRC64);
+    auto ret = ::lzma_easy_encoder(state.get(), 9, LZMA_CHECK_CRC64);
+    assert(ret = LZMA_OK);
     return state;
   }
 
   static inflate_state_type new_inflate_state() {
     inflate_state_type state{new state_type, &::lzma_end};
     *state = LZMA_STREAM_INIT;
-    ::lzma_stream_decoder(state.get(), memlimit, flags);
+    auto ret = ::lzma_stream_decoder(state.get(), std::numeric_limits<uint64_t>::max(), flags);
+    assert(ret == LZMA_OK);
     return state;
   }
 };
@@ -151,10 +163,12 @@ class def_streambuf : public std::basic_streambuf<typename OStrm::char_type, std
         bool def(bool flush);
 
     public:
-        explicit def_streambuf(Tag, OStrm &out) : dest(&out)
+        explicit def_streambuf(OStrm &out) : dest(&out)
         {
             this->setp(in_buf.data(), std::next(in_buf.data(), in_buf.size() - 1));
         }
+
+        explicit def_streambuf(Tag, OStrm &out) : def_streambuf(out) {}
 
     protected:
         int_type overflow(int_type ch) override;
@@ -229,9 +243,8 @@ class inf_streambuf : public std::basic_streambuf<typename IStrm::char_type, std
         typename std::add_pointer<IStrm>::type src;
 
     public:
-        explicit inf_streambuf(Tag, IStrm &in) : src(&in)
-        {
-        }
+        explicit inf_streambuf(IStrm &in) : src(&in) {}
+        explicit inf_streambuf(Tag, IStrm &in) : inf_streambuf(in) {}
 
         std::size_t bytes_read() const
         {
@@ -279,7 +292,8 @@ auto inf_streambuf<T,I>::underflow() -> int_type
         }
 
         // Perform inflation
-        T::inflate(strm);
+        auto result = T::inflate(strm);
+        assert(result == T::status_type::CAN_CONTINUE || result == T::status_type::END);
     }
     // Repeat until we actually get new output
     while (strm->avail_out == uns_out_buf.size());
@@ -291,90 +305,5 @@ auto inf_streambuf<T,I>::underflow() -> int_type
     return base_type::traits_type::to_int_type(this->out_buf.front());
 }
 
-void usage()
-{
-  std::cerr << "zpipe usage: zpipe [-d] [--type=(gz|lzma)] < source > dest" << std::endl;
-}
-
-bool check_decomp(std::string_view sv_arg)
-{
-  // do decompression if -d specified
-  return sv_arg == "-d";
-}
-
-bool check_is_lzma(std::string_view sv_arg)
-{
-  auto eq_idx = sv_arg.find('=');
-
-  if (eq_idx == sv_arg.npos)
-    return false;
-
-  return sv_arg.substr(eq_idx+1) == "xz";
-}
-
-/* compress or decompress from stdin to stdout */
-int main(int argc, char **argv)
-{
-    bool is_decomp = false;
-    bool is_gzip = false;
-    for (auto arg : std::vector<std::string_view>{std::next(argv), std::next(argv, argc)}) {
-      is_decomp |= check_decomp(arg);
-      is_gzip |= check_is_lzma(arg);
-    }
-
-    // Tests
-#ifdef GZIP_INCLUDED
-    static_assert(std::is_move_constructible<inf_streambuf<gzip_tag_t<>, decltype(std::cin)>>::value);
-    static_assert(std::is_move_assignable<inf_streambuf<gzip_tag_t<>, decltype(std::cin)>>::value);
-    static_assert(std::is_swappable<inf_streambuf<gzip_tag_t<>, decltype(std::cin)>>::value);
-    static_assert(std::is_move_constructible<def_streambuf<gzip_tag_t<>, decltype(std::cout)>>::value);
-    static_assert(std::is_move_assignable<def_streambuf<gzip_tag_t<>, decltype(std::cout)>>::value);
-    static_assert(std::is_swappable<def_streambuf<gzip_tag_t<>, decltype(std::cout)>>::value);
-
-    if (is_gzip) {
-      // Initialize a deflation buffer
-      def_streambuf osb{gzip_tag_t{}, std::cout};
-      std::ostream os{&osb};
-
-      // Initialize an inflation buffer
-      inf_streambuf isb{gzip_tag_t{}, std::cin};
-      std::istream is{&isb};
-
-      // Decide which direction to operate
-      std::ostream *out = is_decomp ? &std::cout : &os;
-      std::istream *in  = is_decomp ? &is        : &std::cin;
-
-      // Copy the entire stream
-      std::copy(std::istreambuf_iterator<char>{*in}, std::istreambuf_iterator<char>{}, std::ostreambuf_iterator<char>{*out});
-    }
-#endif
-
-#ifdef LZMA_INCLUDED
-    static_assert(std::is_move_constructible<inf_streambuf<lzma_tag_t<>, decltype(std::cin)>>::value);
-    static_assert(std::is_move_assignable<inf_streambuf<lzma_tag_t<>, decltype(std::cin)>>::value);
-    static_assert(std::is_swappable<inf_streambuf<lzma_tag_t<>, decltype(std::cin)>>::value);
-    static_assert(std::is_move_constructible<def_streambuf<lzma_tag_t<>, decltype(std::cout)>>::value);
-    static_assert(std::is_move_assignable<def_streambuf<lzma_tag_t<>, decltype(std::cout)>>::value);
-    static_assert(std::is_swappable<def_streambuf<lzma_tag_t<>, decltype(std::cout)>>::value);
-
-    if (!is_gzip) {
-      // Initialize a deflation buffer
-      def_streambuf osb{lzma_tag_t{}, std::cout};
-      std::ostream os{&osb};
-
-      // Initialize an inflation buffer
-      inf_streambuf isb{lzma_tag_t{}, std::cin};
-      std::istream is{&isb};
-
-      // Decide which direction to operate
-      std::ostream *out = is_decomp ? &std::cout : &os;
-      std::istream *in  = is_decomp ? &is        : &std::cin;
-
-      // Copy the entire stream
-      std::copy(std::istreambuf_iterator<char>{*in}, std::istreambuf_iterator<char>{}, std::ostreambuf_iterator<char>{*out});
-    }
-#endif
-
-    return 0;
-}
+} // namespace zstream
 
