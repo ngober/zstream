@@ -57,7 +57,7 @@ enum class status_t
 };
 
 #ifdef ZLIB_INCLUDED
-template <int window = 15+32, int compression = Z_DEFAULT_COMPRESSION>
+template <int window = 15+16, int compression = Z_DEFAULT_COMPRESSION>
 struct gzip_tag_t
 {
   using state_type = z_stream;
@@ -77,7 +77,7 @@ struct gzip_tag_t
   }
 
   static status_type inflate(inflate_state_type &x) {
-    ::inflate(x.get(), Z_NO_FLUSH);
+    ::inflate(x.get(), Z_BLOCK);
     return status_type::CAN_CONTINUE;
   }
 
@@ -129,8 +129,8 @@ struct lzma_tag_t
   static deflate_state_type new_deflate_state() {
     deflate_state_type state{new state_type, &::lzma_end};
     *state = LZMA_STREAM_INIT;
-    auto ret = ::lzma_easy_encoder(state.get(), 9, LZMA_CHECK_CRC64);
-    assert(ret = LZMA_OK);
+    auto ret = ::lzma_easy_encoder(state.get(), LZMA_PRESET_DEFAULT, LZMA_CHECK_CRC64);
+    assert(ret == LZMA_OK);
     return state;
   }
 
