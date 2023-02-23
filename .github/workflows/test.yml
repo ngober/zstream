@@ -11,6 +11,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - name: Install Dependencies
+      run: apt install lcov
     - name: make
       run: g++ --std=c++17 --coverage main.cc -lz -llzma
     - name: run
