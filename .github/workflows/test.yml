@@ -12,7 +12,14 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: make
-      run: g++ --std=c++17 main.cc -lz -llzma
+      run: g++ --std=c++17 --coverage main.cc -lz -llzma
     - name: run
       run: ./a.out
+    - name: Capture LCOV
+      run: lcov --capture --directory . --output-file lcov.info
+    - name: Coveralls
+      uses: coverallsapp/github-action@master
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        path-to-lcov: lcov.info
 
