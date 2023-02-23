@@ -18,7 +18,7 @@ jobs:
     - name: run
       run: ./a.out
     - name: Capture LCOV
-      run: lcov --capture --directory . --output-file lcov.info
+      run: lcov --capture --no-external --directory . --output-file lcov.info
     - name: Coveralls
       uses: coverallsapp/github-action@master
       with:
