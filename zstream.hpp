@@ -27,6 +27,7 @@
 #include <cassert>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <streambuf>
 #include <type_traits>
