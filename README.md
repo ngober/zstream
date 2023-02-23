@@ -1,5 +1,6 @@
 [![pre-commit.ci status](https://results.pre-commit.ci/badge/github/ngober/zstream/main.svg)](https://results.pre-commit.ci/latest/github/ngober/zstream/main)
 [![Run Tests](https://github.com/ngober/zstream/actions/workflows/test.yml/badge.svg)](https://github.com/ngober/zstream/actions/workflows/test.yml)
+[![Coverage Status](https://coveralls.io/repos/github/ngober/zstream/badge.svg?branch=main)](https://coveralls.io/github/ngober/zstream?branch=main)
 
 # zstream
 A standard-library-compatible implementation of a stream that compresses or decompresses with zlib.
